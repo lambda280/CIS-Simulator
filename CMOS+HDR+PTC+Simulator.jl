@@ -20,19 +20,30 @@ type ImageDimensions
   z_dim::Int            # frames
 end
 
-# returns an image stack of random deviates representing detected photo-electrons
+# returns an image stack representing detected photo-electrons
 function photons2electrons(photon_number, QE, id::ImageDimensions)
   rand(Poisson(QE*photon_number), id.x_dim, id.y_dim, id.z_dim)
 end
 
-# source follower noise
+# em register transfer function
+function em_register(photoelectrons, ac::AnalogChain)
+  try
+    x_dim, y_dim, z_dim = size(photoelectrons)
+  end
+
+  read_noise = rand(Poisson(signal), x_dim, y_dim, z_dim)
+  # offset(uV) + cvg(uV/e) (signal(e-) + read_noise(e-))
+  ac.adc_offset + ac.pga_gain*(ac.cv_gain*(photoelectrons + read_noise))
+end
+
+# analog transfer functions
 function analog_chain_v(photoelectrons, ac::AnalogChain)
   try
     x_dim, y_dim, z_dim = size(photoelectrons)
   end
 
   read_noise = rand(Normal(0, ac.read_noise), x_dim, y_dim, z_dim)
-  # offset uV + uV/e (signal e- + read_noise e-)
+  # offset(uV) + cvg(uV/e) (signal(e-) + read_noise(e-))
   ac.adc_offset + ac.pga_gain*(ac.cv_gain*(photoelectrons + read_noise))
 end
 
@@ -78,7 +89,7 @@ function gc_p(g1, g2, g1_min_signal, g1_max_signal)
   out
 end
 
-# gc_a: Straight averaging
+# gc_a: Straight averaging gain combiner
 function gc_a(g1, g2, g1_min_signal, g1_max_signal)
   if g1 < g1_min_signal
     out = g1
@@ -144,8 +155,8 @@ function ptc2(min_s, max_s, step, ac1::AnalogChain, ac2::AnalogChain, id::ImageD
   q4g = (ac2.max_volts-ac2.min_volts)/(ac2.cv_gain * ac2.pga_gain * (2^ac2.bit_depth - 1))
 
   for i in imap(x -> x, range(min_s, step, num_steps))
-    s0 = photons2electrons(i, id)
-    s1 = em_multiplier(s0,ac1.em_gain)
+    s0 = photons2electrons(i, 0.8, id)
+    s1 = s0 #em_multiplier(s0,ac1.em_gain)
     s2 = analog_chain_v(s1, ac1)
     s3 += nonlinear.(s2, 0)
     s3 = analog_to_digital_v(s3, ac1)
@@ -201,12 +212,10 @@ end
 
   sgc = fw2_electrons/(2^16-1)
 
-
 (fw1_electrons, fw2_electrons)
 
 #(min signal(e), max signal(e), step(e), analog chain 1, analog chain 2, image dimensions )
   ptc_a1, ptc_a2, ptc_c = ptc2(0, 21000, 100, a1, a2, id12)
-
 
 #pretty plots
 rick_morty = Theme(point_size = 3pt, point_size_max = 3pt)
@@ -230,3 +239,9 @@ id12 = ImageDimensions( 100, 100, 100)
 z1 = analog_chain_v(100, a1, id12)
 q1 = analog_to_digital_v(z1, a1)
 colorview(Gray, mean(q1,3)[:,:,1]/512)
+
+em_img = rand(Gamma(10, 100-1+1/10),100,100)
+colorview(Gray, em_img/2000)
+mean(em_img)
+q = DataFrame(ADU = vec(em_img))
+plot(q, x="ADU", Geom.histogram)

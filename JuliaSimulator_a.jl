@@ -150,15 +150,15 @@ function ptc2(min_s, max_s, step, ac1::AnalogChain, ac2::AnalogChain, id::ImageD
   q2o = (ac2.adc_offset*(2^ac2.bit_depth-1)/(ac2.max_volts - ac2.min_volts))
   q2g = (ac2.max_volts-ac2.min_volts)/(ac2.cv_gain * ac2.pga_gain * (2^ac2.bit_depth - 1))
 
-  for i in imap(x -> x, range(min_s, step, num_steps))
+  for i in imap(x -> sqrt(x), range(min_s, step, num_steps))
     z1 = analog_chain_v(i, ac1, id)
     q1 = analog_to_digital_v(z1, ac1)
-    q1 = clamp.((q1 .- q1o),0, 65535) .* q1g
+    q1 = clamp.((q1 .- q1o),0, (2^ac1.bit_depth-1)) .* q1g
 
     z2 = analog_chain_v(i, ac2, id)
-    z2 += nonlinear.(z2, -0.05/400000)
-    q2 = analog_to_digital(z2, ac2)
-    q2 = clamp.((q2 .- q2o), 0, 65536) .* q2g
+    #z2 += nonlinear.(z2, -0.05/400000)
+    q2 = analog_to_digital_v(z2, ac2)
+    q2 = clamp.((q2 .- q2o), 0, (2^ac2.bit_depth-1)) .* q2g
 
     q3 = gain_combiner_e_v(q1, q2, gc_p, cmb_range_min, cmb_range_max)
 
@@ -210,8 +210,19 @@ p1 = plot(ptc_c, x="Signal_E", y="Noise_E", Scale.x_log10(minvalue=10), Scale.y_
 p2 = plot(ptc_a1, x="Signal_E", y="Noise_E", Scale.x_log10(minvalue=10), Scale.y_log10(minvalue=10),
             Guide.xlabel("Signal(e)"), Guide.ylabel("STD(e)"), Guide.title("Photon Transfer Curve HG"))
 
-p3 = plot(ptc_a2, x="Signal_E", y="Noise_E", Scale.x_log10(minvalue=10), Scale.y_log10(minvalue=10),
+x_marks = [0,1,2,3]
+y_marks = [0,1,2,3]
+p3 = plot(ptc_a2, x="Signal_E", y="Noise_E", Scale.x_log10(minvalue=1), Scale.y_log10(minvalue=10),
+            Guide.xticks(ticks=x_marks),
             Guide.xlabel("Signal(e)"), Guide.ylabel("STD(e)"), Guide.title("Photon Transfer Curve LG"))
+
+p2a = plot(ptc_a1, x="Signal_E", y="Noise_E", Coord.cartesian(xmin=0, ymin=0), Geom.line, Geom.point,
+          Scale.x_log10, Scale.y_log10,
+          Guide.xlabel("Signal(e)"), Guide.ylabel("STD(e)"), Guide.title("Photon Transfer Curve"))
+
+p2b = plot(ptc_a2, x="Signal_E", y="Variance_E2", Coord.cartesian, Geom.line, Geom.point,
+          Scale.x(minvalue=10), Scale.y(minvalue=10),
+          Guide.xlabel("Signal(e)"), Guide.ylabel("Variance(e^2)"), Guide.title("Mean Variance Curve"))
 
 p4 = plot(layer(ptc_c, x="Signal_E", y="Noise_E", Geom.point, order=1),
      layer(ptc_a1, x="Signal_E", y="Noise_E", Geom.line, order=2),

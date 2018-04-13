@@ -29,7 +29,7 @@ immutable AnalogChain
   read_noise::Float64     # read noise in input referred e- equivalent
   pga_gain::Float64       # PGA gain in uV/uV
   non_linearity::Float64  # non linearity as a % deviation at FWC
-  offset::Float64         # offset in uV used to create th ADC bias offset
+  offset::Float64         # offset in uV used to create the ADC bias offset
 end
 
 immutable FPN
@@ -43,14 +43,14 @@ immutable ADC
   bit_depth::Int64        # ADC bit depth
   min_volts::Float64      # ADC minimum input voltage
   max_volts::Float64      # ADC maximum input voltage
-  bad_range               # A range type which ADC malfunctions
-  excess_noise::Float64   # excess noise as percentage of signal
+  bad_range               # A range over which the ADC malfunctions
+  excess_noise::Float64   # ADC excess noise as percentage of signal
 end
 
 immutable ADCCombiner
   bits::Int64        # = 16
-  offset_dn::Int64   # = 100
-  min::Int64         # = 1000
+  offset_dn::Int64   # = 100  Digital restore of combined signal offset
+  min::Int64         # = 1000 Range over which ADC combiner operates
   max::Int64         # = 1100
 end
 
@@ -61,26 +61,27 @@ end
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~  electronic transfer functions ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #   Issue: The one-pixel approach to drawing random numbers is slow.
-#   Using rand(distribution, array) is faster as long as distribution exists in stats module
-#   This is not the case for EMCCD excess noise, RTN, or even Idark
+#   Using rand(distribution, array) is faster as long as an appropriate
+#   distribution exists in julia's stats module.  This is not the case for EMCCD 
+#   excess noise, RTN, or even Idark
 #
 #   Solutions:
 #   - the stats package could be extended to include the needed distributions
-#   - where possible create pool of random numbers to draw from inside transfer functions
+#   - where possible create pool of random numbers to draw from
 
 # returns Poisson distributed random number representing detected photo-electrons
-function photon_noise(pixel_flux::Float64, pixel::PixelProperties)
+function photon_noise(pixel_flux::Float64, pixel::PixelProperties)::Int64
   rand(Poisson(pixel.qe*pixel_flux))
 end
 
-# this is a stub
-function dark_noise(temperature::Float64, pixel::PixelProperties)
-  rand(Poisson(pixel.i_dark))
+# this is a stub until I put in the right distribution function
+function dark_noise(temperature::Float64, pixel::PixelProperties)::Int64
+  rand(Poisson(pixel.i_dark*pixel.x_dim*pixel.y_dim))
 end
 
 # EMCCD EM register transfer function
 #   - A functional form for the distribution function would be faster
-function em_register(input_e::Int64, ac::AnalogChain)
+function em_register(input_e::Int64, ac::AnalogChain)::Int64
   if ac.em_gain <= 0 return input_e end
   accumulator = input_e
   for i in range(1,ac.em_stages)
@@ -91,27 +92,27 @@ end
 
 # returns a Normal distributed random number representing read noise
   # read noise is an input referred amalgamation of several noise factors
-  # - move to voltage domain and redestribute across the approprate
-  #   stages of the analog chain
-function read_noise(ac::AnalogChain)
+  # - Todo: move to voltage domain and redestribute noise across the approprate
+  #   stages of the analog chain - pre CVG
+function read_noise(ac::AnalogChain)::Float64
   rand(Normal(0, ac.read_noise))
 end
 
 # stub: returns <distribution> distributed random number representing rtn noise
-  # can add noise power spectrum and timing dependencies
-function rtn_noise(ac::AnalogChain)
+  # can find appropriate distribution for the long tail
+function rtn_noise(ac::AnalogChain)::Float64
   rand(Normal(0, ac.read_noise))
 end
 
 # analog chain transfer functions
   # can add further noise models with modeling CDS process
-function analog_chain_v(photoelectrons::Int64, ac::AnalogChain)
+function analog_chain_v(photoelectrons::Int64, ac::AnalogChain)::Float64
   # offset(uV) + cvg(uV/e-) [signal(e-) + read_noise(e-)]
-  ac.offset + ac.pga_gain*(ac.cv_gain*n)+ac.pga_gain*ac.cv_gain*read_noise(ac)
+  ac.offset + ac.pga_gain*(ac.cv_gain*photoelectrons)+ac.pga_gain*read_noise(ac)
 end
 
 # fixed pattern noise
-  # - the row/col nature breaks the "by pixel" design paradigm
+  # - without globals for row/col this breaks the "by pixel"  paradigm
 function fpn(z, fp::FPN, i::ImageDimensions)
   # nomenclature: co = column offset, cg = column gain
   covec = fp.col_offset > 0 ? rand(Normal(0, fp.col_offset), i.y_dim) : 0
@@ -126,15 +127,15 @@ function fpn(z, fp::FPN, i::ImageDimensions)
 end
 
 # convert PGA output to digital numbers
-  # ideally use fixed point math via "FixedPointNumbers"
-function analog_to_digital_v(value, adc::ADC)
+  # ideally use fixed point math via "FixedPointNumbers" library
+function analog_to_digital_v(value, adc::ADC)::Int32
   cvalue = value*(2^adc.bit_depth-1)/(adc.max_volts - adc.min_volts)
   cvalue = round(((cvalue >= adc.bad_range[1]) && (cvalue <= adc.bad_range[end])) ? rand(Normal(cvalue,adc.excess_noise)) : cvalue)
   clamp(cvalue, 0, 2^adc.bit_depth-1)
 end
 
 # signal response nonlinearity transfer function
-function nonlinear(signal, ac::AnalogChain)
+function nonlinear(signal, ac::AnalogChain)::Float64
    signal + ac.non_linearity * signal^2
 end
 
@@ -216,7 +217,6 @@ function ptc_exposures(min_signal::Int64, max_signal::Int64, steps::Int64)
   step_size = log10(max_signal + 1)/steps
   exposures = imap(x -> (10^x)-1, range(min_signal, step_size, steps))
 end
-
 
 # Photon Transfer and Mean Variance
 #   - optional/default params must be at end of argument list
@@ -390,7 +390,7 @@ id = ImageDimensions( 100, 100, 100)
 
 # example PTC with normal single output CCD
 pix = PixelProperties(0.55, 10, 10, 0)
-ac0 = AnalogChain( 0, 1, 10, 7, 1, 0, 19533)
+ac0 = AnalogChain( 0, 1, 10, 70, 1, 0, 19533)
 fp0 = FPN(0,0,0,0)
 adc0 = ADC(14, 0, 1000000, 2^12-100:2^12+100, 10)
 
@@ -408,14 +408,17 @@ ptc_plot([ptc_in, ptc_14])
 noise_adjust(ptc_14, 7, q_noise)
 
 p0 = plot(
-       layer(ptc_in, x="Signal_E", y="Noise_E", Geom.line, order=1, Theme(default_color=colorant"Red")),
-       layer(ptc_14, x="Signal_E", y="Noise_E", Geom.point, Geom.line, order=2, Theme(default_color=colorant"Green")),
-       layer(ptc_14, x="Signal_E", y="Noise_S_E", Geom.line, order=3, Theme(default_color=colorant"Blue")),
+       layer(ptc_in[3:end,:], x="Signal_E", y="Noise_E", Geom.line, order=1, Theme(default_color=colorant"Red")),
+       layer(ptc_14[3:end,:], x="Signal_E", y="Noise_E", Geom.point, Geom.line, order=2, Theme(default_color=colorant"Green")),
+       layer(ptc_14[3:end,:], x="Signal_E", y="Noise_S_E", Geom.line, order=3, Theme(default_color=colorant"Blue")),
        Guide.xticks(ticks=[0:1:6;]), Guide.yticks(ticks=[0:0.2:3;]),
        style(major_label_font="CMU Serif",minor_label_font="CMU Serif", major_label_font_size=12pt,minor_label_font_size=10pt),
        Scale.x_log10(labels=x -> @sprintf("%0.0f", 10^x)), Scale.y_log10(labels=x -> @sprintf("%0.1f", 10^x)),
        Guide.xlabel("Signal(e)"), Guide.ylabel("STD(e)"),
        Guide.title("Photon Transfer Curve 14-bit, 100K FW"))
+
+ # Regression
+ mv_fit = fit(QuadraticModel, @formula(Variance_DN ~ Signal_DN), ptc_14)
 
  # And saving
  #img = SVG("C:\\Users\\rlabelle\\Dropbox\\Simulator\\Graphs\\ptc_14.svg", 6inch, 4inch)
@@ -599,11 +602,22 @@ img = SVG("/Users/rob/Dropbox/Simulator/Graphs/ptc1.svg", 6inch, 4inch)
 draw(img, p3)
 p3
 
+#~~~~~~~~~~~~~~~~~~~~~~~ importing real image data ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+using FileIO
+img = load("/Users/rob/Dropbox/Simulator/subimage.tif")
+img_stack = load("/Users/rob/Dropbox/Simulator/Delta 100FrameBiasStack.tif")
+
+mean(img_stack)
+minimum(img_stack)
+maximum(img_stack)
+
+imshow(img_stack)
+
+
+
 #display image of a 100e- signal - averaged across 100 frames
 em_img = rand(Gamma(10, 100-1+1/10),100,100)
 colorview(Gray, em_img/2000)
 mean(em_img)
 q = DataFrame(ADU = vec(em_img))
 plot(q, x="ADU", Geom.histogram)
-
-#~~~~~~~~~~~~~~~~~~~~~~~ importing real image data ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
