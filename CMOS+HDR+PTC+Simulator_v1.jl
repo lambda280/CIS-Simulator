@@ -62,7 +62,7 @@ end
 #~~~~~~~~~~~~~~~~~  electronic transfer functions ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #   Issue: The one-pixel approach to drawing random numbers is slow.
 #   Using rand(distribution, array) is faster as long as an appropriate
-#   distribution exists in julia's stats module.  This is not the case for EMCCD 
+#   distribution exists in julia's stats module.  This is not the case for EMCCD
 #   excess noise, RTN, or even Idark
 #
 #   Solutions:
@@ -286,7 +286,7 @@ function ptc(pixel::PixelProperties, ac::AnalogChain, fp_noise::FPN, adc::ADC, i
 end
 
 # generate a dual gain HDR PTC plot, return 3 DataFrames
-function ptc(pattern=ones, expose_f=ptc_exposures, ac1::AnalogChain, ac2::AnalogChain, adc::ADC, combiner::ADCCombiner, id::ImageDimensions, pixel::PixelProperties)
+function ptc(ac1::AnalogChain, ac2::AnalogChain, adc::ADC, combiner::ADCCombiner, id::ImageDimensions, pixel::PixelProperties,pattern=ones, expose_f=ptc_exposures)
   a1m = []
   a1s = []
   a1v = []
